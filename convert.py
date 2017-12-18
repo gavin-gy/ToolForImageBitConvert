@@ -1,85 +1,166 @@
 # coding=utf-8
-from osgeo import gdal
-from gdalconst import *
-import cv2
 import math
+import cv2
+from gdalconst import *
+from osgeo import gdal
+import platform
 
-inputBitNum = 8
-outputBitNum = 16
-bands = []
-maxNums = []
-band_data = []
 
-root = raw_input("影像所在路径(e.g. E:\\)：\n")
-root = root + "\\"
-name = raw_input("影像名称(e.g. 1.tif)：\n")
+def getSeparator():
+    """
+    Get the separator for different systems.
 
-# 以只读方式打开遥感影像
-dataset = gdal.Open(root + name, GA_ReadOnly)
+    :return: String,the separator.e.g. "/" on linux.
+    """
+    sysstr = platform.system()
+    if (sysstr == "Windows"):
+        separator = "\\"
+    elif (sysstr == "Linux"):
+        separator = "/"
+    else:
+        separator = "/"
+    return separator
 
-print "\n影像打开成功！\n"
 
-# 输出影像信息
-print '影像信息:'
-print '影像类型:', dataset.GetDriver().ShortName
-print '影像描述:', dataset.GetDescription()
-print '影像包含波段数:', dataset.RasterCount
-print "\n"
+def convertBit(image_path, out_bit_depth, out_band_sequence, isVisuable=True, showInfo=True):
+    """
+    A function for convert different image bit depth.
 
-for i in range(dataset.RasterCount):
-    bands.append(dataset.GetRasterBand(i + 1))
+    :param image_path: String,image path,e.g. "E:/images/test.tif"
+    :param out_bit_depth: Int,bit depth for output image.e.g. 8
+    :param out_band_sequence: String,format "a,b,c",separated by ",". "abc" means band index,start from 0.Input "1" means only band-1 data. e.g."2,1,0"
+    :param isVisuable: Boolean,True as default.
 
-for i in range(dataset.RasterCount):
-    print "波段", (i + 1).__str__(), ":"
-    print "影像宽：", bands[i].XSize
-    print "影像高：", bands[i].XSize
-    print '数据类型:', bands[i].DataType
-    print '影像最小最大值:', bands[i].ComputeRasterMinMax()
-    print "-------------------------------"
+                        True:The pixel value is not the right value for the bit depth you choose.It is calculated in 8-bit or 16-bit to let you see as it is right.
+
+                        False:The pixel value is the right value for the bit depth.But you may see the iamge as a black one or a white one.Beacuse OpenCV can only save images in 8-bit or 16-bit.As a 1-bit image,the pixel value will only be 0 or 1.And it will be saved in 8-bit,which has a range [0,255].So the image will looks like a whole black one.
+    :param showInfo: Boolean,True as default.Whether to show information during processing.
+    :return: Nothing.But the output image will be saved in the same dictionary.
+
+    Usage:
+     convertBit("E:/test/001.tif", 8, "2,1,0")
+    """
+    name = image_path.split(getSeparator())[-1]
+    root = image_path.split(name)[0]
+    outputBitNum = out_bit_depth
+    output_bands = out_band_sequence
+
+    bands = []
+    maxNums = []
+    band_data = []
+
+    dataset = gdal.Open(root + name, GA_ReadOnly)
+
+    if showInfo:
+        print 'Image Info:'
+        print 'Image Type:', dataset.GetDriver().ShortName
+        print 'Image Description:', dataset.GetDescription()
+        print 'Image Bands:', dataset.RasterCount
+        print "\n"
+
+    for i in range(dataset.RasterCount):
+        bands.append(dataset.GetRasterBand(i + 1))
+
+    if showInfo:
+        for i in range(dataset.RasterCount):
+            print "Band", (i + 1).__str__(), ":"
+            print "Width:", bands[i].XSize
+            print "Height:", bands[i].YSize
+            print 'Data type:', bands[i].DataType
+            print 'Max&Min:', bands[i].ComputeRasterMinMax()
+            print "-------------------------------"
 
     maxNums.append(bands[i].ComputeRasterMinMax()[1])
 
-inputBitNum = int(math.ceil(math.log(max(maxNums), 2)))
-print "读取影像位数：", inputBitNum
+    inputBitNum = int(math.ceil(math.log(max(maxNums), 2)))
+    if showInfo:
+        print "Bit depth of input image：", inputBitNum
 
-outputBitNum = raw_input("设置输出影像位数(2的整数次方)：\n")
-
-for i in range(dataset.RasterCount):
-    band_data.append(bands[i].ReadAsArray(0, 0, bands[i].XSize, bands[i].YSize))
-
-if int(outputBitNum) < int(inputBitNum):
-    param = int(pow(2, inputBitNum) / pow(2, int(outputBitNum)))
     for i in range(dataset.RasterCount):
-        band_data[i] = band_data[i] / param
-else:
-    param = int(pow(2, int(outputBitNum)) / pow(2, inputBitNum))
-    for i in range(dataset.RasterCount):
-        band_data[i] = band_data[i] * param
+        band_data.append(bands[i].ReadAsArray(0, 0, bands[i].XSize, bands[i].YSize))
 
-print "波段信息:"
-for i in range(dataset.RasterCount):
-    print "[", i.__str__(), "]:band", (i + 1).__str__()
-
-output_bands = raw_input(
-    "指定输出图像的RGB波段顺序（逗号隔开，波段序号小于" + dataset.RasterCount.__str__() + "，如2,1,0）。若输出单波段灰度图，输入一个数字即可。：\n")
-
-band_num = output_bands.split(",")
-
-if int(outputBitNum) < int(inputBitNum):
-    if band_num.__len__() < 3:
-        datagray = band_data[int(band_num[0])]
-        cv2.imwrite(root + name.split(".")[0] + "_" + band_num[0] + ".jpg", datagray)
-        print "保存成功！路径： " + root + name.split(".")[0] + "_" + band_num[0] + ".jpg"
+    if isVisuable is True:
+        # convert image to visuable bit depth in 8bit or 16bit,not the right real pixel value
+        if int(outputBitNum) < int(inputBitNum):
+            if outputBitNum <= 8:
+                param = int(pow(2, inputBitNum) / pow(2, int(outputBitNum)))
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] / param
+                # convert to visiable 8-bit
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] * int(255 / (pow(2, int(outputBitNum)) - 1))
+            elif int(outputBitNum > 8):
+                param = int(pow(2, int(inputBitNum)) / pow(2, outputBitNum))
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] / param
+                # convert to visiable 16-bit
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] * int(65535 / (pow(2, int(outputBitNum)) - 1))
+        elif int(outputBitNum) > int(inputBitNum):
+            param = int(pow(2, int(outputBitNum)) / pow(2, inputBitNum))
+            for i in range(dataset.RasterCount):
+                band_data[i] = band_data[i] * param
+            if int(outputBitNum) <= 8:
+                print
+                # convert to visiable 8-bit
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] * int(255 / (pow(2, int(outputBitNum)) - 1))
+            elif int(outputBitNum > 8):
+                print
+                # convert to visiable 16-bit
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] * int(65535 / (pow(2, int(outputBitNum)) - 1))
+        elif int(outputBitNum) == int(inputBitNum):
+            if int(outputBitNum) <= 8:
+                print
+                # convert to visiable 8-bit
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] * int(255 / (pow(2, int(outputBitNum)) - 1))
+            elif int(outputBitNum > 8):
+                print
+                # convert to visiable 16-bit
+                for i in range(dataset.RasterCount):
+                    band_data[i] = band_data[i] * int(65535 / (pow(2, int(outputBitNum)) - 1))
     else:
-        datagray = cv2.merge([band_data[int(band_num[0])], band_data[int(band_num[1])], band_data[int(band_num[2])]])
-        cv2.imwrite(root + name.split(".")[0] + ".jpg", datagray)
-        print "保存成功！路径： " + root + name.split(".")[0] + ".jpg"
-else:
-    if band_num.__len__() < 3:
-        datagray = band_data[int(band_num[0])]
-        cv2.imwrite(root + name.split(".")[0] + "_" + band_num[0] + ".png", datagray)
-        print "保存成功！路径： " + root + name.split(".")[0] + "_" + band_num[0] + ".png"
+        if int(outputBitNum) < int(inputBitNum):
+            param = int(pow(2, inputBitNum) / pow(2, int(outputBitNum)))
+            for i in range(dataset.RasterCount):
+                band_data[i] = band_data[i] / param
+        else:
+            param = int(pow(2, int(outputBitNum)) / pow(2, inputBitNum))
+            for i in range(dataset.RasterCount):
+                band_data[i] = band_data[i] * param
+
+    if showInfo:
+        print "Band Info:"
+        for i in range(dataset.RasterCount):
+            print "[", i.__str__(), "]:band", (i + 1).__str__()
+
+    band_num = output_bands.split(",")
+
+    if int(outputBitNum) <= 8:
+        if band_num.__len__() < 3:
+            for i in range(len(band_num)):
+                datagray = band_data[int(band_num[i])]
+                cv2.imwrite(root + name.split(".")[0] + "_" + band_num[i] + ".jpg", datagray)
+                if showInfo:
+                    print "Success! " + root + name.split(".")[0] + "_" + band_num[i] + ".jpg"
+        else:
+            datagray = cv2.merge(
+                [band_data[int(band_num[0])], band_data[int(band_num[1])], band_data[int(band_num[2])]])
+            cv2.imwrite(root + name.split(".")[0] + ".jpg", datagray)
+            if showInfo:
+                print "Success! " + root + name.split(".")[0] + ".jpg"
     else:
-        datagray = cv2.merge([band_data[int(band_num[0])], band_data[int(band_num[1])], band_data[int(band_num[2])]])
-        cv2.imwrite(root + name.split(".")[0] + ".png", datagray)
-        print "保存成功！路径： " + root + name.split(".")[0] + ".png"
+        if band_num.__len__() < 3:
+            for i in range(len(band_num)):
+                datagray = band_data[int(band_num[i])]
+                cv2.imwrite(root + name.split(".")[0] + "_" + band_num[i] + ".png", datagray)
+                if showInfo:
+                    print "Success! " + root + name.split(".")[0] + "_" + band_num[i] + ".png"
+        else:
+            datagray = cv2.merge(
+                [band_data[int(band_num[0])], band_data[int(band_num[1])], band_data[int(band_num[2])]])
+            cv2.imwrite(root + name.split(".")[0] + ".png", datagray)
+            if showInfo:
+                print "Success! " + root + name.split(".")[0] + ".png"
